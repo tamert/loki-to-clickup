@@ -41,17 +41,30 @@ SKIP = f', app!~"{"|".join(IGNORE_APPS)}"' if IGNORE_APPS else ""
 
 # Symfony uncaught exception'ları "critical" basıyor; Node tarafında 500 ya da uncaught olanlar.
 # metadata.statusCode: orav'ın Nest filter'ı; iç içe context.statusCode'lar (centrio) aynı olayın kopyası, alınmıyor.
+# env= label'li stream'lerde (Logo, mentorluk, logoakademi) level stream label'i degil yapisal metadata:
+# {level=...} selector'u bunlari hic gormuyor, level filtre asamasinda secilir. Monolog error'larindan
+# sadece kritik olanlar (PHP Error, DB, upstream 5xx); 4xx is kurali hatalari (BadRequest vb.) disarida.
 QUERIES = [
     '{level="critical"' + SKIP + '}',
-    '{level="error"' + SKIP + '} |~ "uncaughtException|unhandledRejection|\\"status\\":5[0-9]{2}|\\"metadata\\":\\\\{\\"statusCode\\":5[0-9]{2}| - 5[0-9]{2}\\""',
+    '{env=~".+"' + SKIP + '} | level="critical"',
+    '{env=~".+"' + SKIP + '} | level="error" |~ "(Error|ErrorException|TypeError|ParseError|QueryException|PDOException|'
+    'NoTypeDetectedException)\\\\(code:|SQLSTATE|Call to a member function|Unhandled error event|Operation [A-Za-z]+ Error|'
+    'status[^:]{0,3}:5[0-9]{2}" !~ "is deprecated"',
+    '{level="error"' + SKIP + '} |~ "uncaughtException|unhandledRejection|Unhandled error event|\\"status\\":5[0-9]{2}|\\"metadata\\":\\\\{\\"statusCode\\":5[0-9]{2}| - 5[0-9]{2}\\""',
 ]
 
 # Nest'in 4xx exception'ları uncaught diye loglanıyor ama 500 değil.
 # ponytail: düz HttpException de atlanıyor (gözlenenlerin hepsi 4xx), 500 kaçarsa status alanına bakılmalı
-FOURXX = re.compile(r"^(Http|Unauthorized|NotFound|BadRequest|Forbidden|Gone|Conflict|UnprocessableEntity|"
-                    r"NotAcceptable|MethodNotAllowed|PayloadTooLarge|TooManyRequests)Exception$")
-SECRET_RE =re.compile(r'((?:secret|password|passwd|token|api[_-]?key|authorization)["\']?\s*[=:]\s*["\']?)[^"\'&\s,}]+', re.I)
+FOURXX = re.compile(r"^((Http|Unauthorized|NotFound|BadRequest|Forbidden|Gone|Conflict|UnprocessableEntity|"
+                    r"NotAcceptable|MethodNotAllowed|PayloadTooLarge|TooManyRequests)Exception|ForbiddenError)$")
+# Escape'li JSON (\"client_secret\":\"...\") ve "Authorization":"Bearer <token>" de maskelenir.
+SECRET_RE = re.compile(r'((?:secret|password|passwd|token|api[_-]?key|authorization|client_id)\\*["\']?\s*[=:]\s*\\*["\']?'
+                       r'(?:Bearer\s+)?)[^"\'\\&\s,}]+', re.I)
+# OAuth "code": statusCode/errorCode ve kisa kodlar (GENERIC_ERROR, 499) maskelenmez.
+OAUTH_CODE_RE = re.compile(r'((?<![A-Za-z_])code\\*["\']?\s*[=:]\s*\\*["\']?)[A-Za-z0-9._~-]{16,}', re.I)
+MONOLOG = re.compile(r"^\[[^\]]+\] [\w-]+\.\w+: (.*?) (?:\{.*\}|\[\]) (?:\{.*\}|\[\])\s*$", re.S)
 VOLATILE = [
+    (re.compile(r"\(SQL: .*", re.S), ""),  # Laravel QueryException: ayni DB hatasi farkli sorgularda tek task
     (re.compile(r"\?[^\s\"']*"), ""),  # query string
     (re.compile(r"\{[^}]*\}"), ""),  # story.NOT_FOUND{slug:...}
     (re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I), "<uuid>"),
@@ -63,7 +76,13 @@ VOLATILE = [
 
 
 def mask(s):
-    return SECRET_RE.sub(r"\1***", s)
+    return OAUTH_CODE_RE.sub(r"\1***", SECRET_RE.sub(r"\1***", s))
+
+
+def stack_name(stack):
+    """Stack'in ilk satırındaki exception adı ("TypeError: x" -> TypeError; ":" yoksa ilk satır)."""
+    first = (stack or "").strip().splitlines()[0] if (stack or "").strip() else ""
+    return first.split(":", 1)[0].strip()
 
 
 def parse(labels, line):
@@ -84,11 +103,16 @@ def parse(labels, line):
             if FOURXX.match(name or ""):
                 return None
             if meta.get("event") == "http_exception":  # URL değil asıl hata: "GET /x - 500" -> "TypeError: ..."
-                return (meta.get("stack") or "").split(":", 1)[0] or exc, str(meta.get("message") or msg)
+                return stack_name(meta.get("stack")) or exc, str(meta.get("message") or msg)
             if int(meta.get("statusCode") or 0) >= 500 and (meta.get("error") or meta.get("stack")):
                 # Nest filter'ı (orav): mesaj hep "Internal Server Error", asıl hata metadata.error/stack'te
-                return name or (meta.get("stack") or "").split(":", 1)[0] or exc, error_summary(meta) or msg
+                return name or stack_name(meta.get("stack")) or exc, error_summary(meta) or msg
             return name, msg.removeprefix("uncaughtException: ")
+    # Monolog tek satır: "[ts] loki.ERROR: mesaj {context} []"; exception context'te "[object] (Sınıf(code: N): ...)"
+    mono = MONOLOG.match(line.strip())
+    if mono:
+        cls = re.search(r"\(([\w\\\\]+)\(code:", line)
+        return (cls.group(1).replace("\\\\", "\\") if cls else exc), mono.group(1)
     # Symfony/monolog düz metin: "Exception: X\nMessage: Y"
     m = re.search(r"^Exception: (.+)$", line, re.M)
     mm = re.search(r"^Message: (.+)$", line, re.M)
