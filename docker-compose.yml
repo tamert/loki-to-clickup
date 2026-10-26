@@ -1,0 +1,12 @@
+services:
+  clickup-loki:
+    build: .
+    container_name: clickup-loki
+    restart: always
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
