@@ -40,9 +40,10 @@ IGNORE_APPS = [x.strip() for x in os.environ.get("IGNORE_APPS", "").split(",") i
 SKIP = f', app!~"{"|".join(IGNORE_APPS)}"' if IGNORE_APPS else ""
 
 # Symfony uncaught exception'ları "critical" basıyor; Node tarafında 500 ya da uncaught olanlar.
+# metadata.statusCode: orav'ın Nest filter'ı; iç içe context.statusCode'lar (centrio) aynı olayın kopyası, alınmıyor.
 QUERIES = [
     '{level="critical"' + SKIP + '}',
-    '{level="error"' + SKIP + '} |~ "uncaughtException|unhandledRejection|\\"status\\":5[0-9]{2}| - 5[0-9]{2}\\""',
+    '{level="error"' + SKIP + '} |~ "uncaughtException|unhandledRejection|\\"status\\":5[0-9]{2}|\\"metadata\\":\\\\{\\"statusCode\\":5[0-9]{2}| - 5[0-9]{2}\\""',
 ]
 
 # Nest'in 4xx exception'ları uncaught diye loglanıyor ama 500 değil.
@@ -84,11 +85,24 @@ def parse(labels, line):
                 return None
             if meta.get("event") == "http_exception":  # URL değil asıl hata: "GET /x - 500" -> "TypeError: ..."
                 return (meta.get("stack") or "").split(":", 1)[0] or exc, str(meta.get("message") or msg)
+            if int(meta.get("statusCode") or 0) >= 500 and (meta.get("error") or meta.get("stack")):
+                # Nest filter'ı (orav): mesaj hep "Internal Server Error", asıl hata metadata.error/stack'te
+                return name or (meta.get("stack") or "").split(":", 1)[0] or exc, error_summary(meta) or msg
             return name, msg.removeprefix("uncaughtException: ")
     # Symfony/monolog düz metin: "Exception: X\nMessage: Y"
     m = re.search(r"^Exception: (.+)$", line, re.M)
     mm = re.search(r"^Message: (.+)$", line, re.M)
     return (m.group(1) if m else exc), (mm.group(1) if mm else line.splitlines()[0] if line else "")
+
+
+def error_summary(meta):
+    """Prisma: "Invalid `this.prisma.x.create()` invocation: <asıl sebep>", diğerleri ilk satır."""
+    lines = [x.strip() for x in str(meta.get("error") or meta.get("stack") or "").splitlines() if x.strip()]
+    if not lines:
+        return ""
+    if lines[0].startswith("Invalid `"):
+        return f"{lines[0].removesuffix(' in')}: {lines[-1]}"
+    return lines[0]
 
 
 def fingerprint(app, exc, msg):
