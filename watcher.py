@@ -155,6 +155,7 @@ def create_task(g):
         "markdown_description": desc,
         "assignees": ASSIGNEES,
         "priority": 2 if env.startswith("prod") else 3,
+        "custom_item_id": 1004,  # workspace'teki "Bug" task tipi
     }
     return clickup("POST", f"/list/{LIST_ID}/task", body)["id"]
 
