@@ -27,3 +27,10 @@ assert w.parse({"exception_class": ""}, crit) == ("", "Recovered seats : 1cba3bb
 assert w.stack_name("Error\n    at Query.run (x.js:1)") == "Error"
 assert w.FOURXX.match("ForbiddenError") and w.FOURXX.match("NotFoundException")
 print("ok")
+
+
+w.ASSIGNEES, w.OWNER_ID, w.OWNER_SKIP_APPS = [1, 2], 9, {"corpeo-v1"}
+assert w.assignees_for("tua-cms") == [1, 2, 9]
+assert w.assignees_for("corpeo-v1") == [1, 2]
+w.OWNER_ID = 0
+assert w.assignees_for("tua-cms") == [1, 2]

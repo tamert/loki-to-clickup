@@ -27,6 +27,9 @@ LOKI = os.environ.get("LOKI_URL", "http://localhost:3100").rstrip("/")
 TOKEN = os.environ.get("CLICKUP_TOKEN", "")
 LIST_ID = os.environ.get("CLICKUP_LIST_ID", "")
 ASSIGNEES = [int(x) for x in os.environ.get("CLICKUP_ASSIGNEES", "").split(",") if x.strip()]
+# OWNER_ID her task'a eklenir, OWNER_SKIP_APPS'teki app'ler hariç
+OWNER_ID = int(os.environ.get("OWNER_ID") or 0)
+OWNER_SKIP_APPS = {x.strip() for x in os.environ.get("OWNER_SKIP_APPS", "").split(",") if x.strip()}
 INTERVAL = int(os.environ.get("INTERVAL_SEC", "300"))
 COMMENT_EVERY = int(os.environ.get("COMMENT_EVERY_MIN", "60")) * 60
 FIRST_LOOKBACK = int(os.environ.get("FIRST_LOOKBACK_MIN", "15")) * 60
@@ -167,6 +170,12 @@ def fmt(ns):
     return datetime.fromtimestamp(ns / 1e9, TR).strftime("%d.%m %H:%M:%S")
 
 
+def assignees_for(app):
+    if OWNER_ID and app not in OWNER_SKIP_APPS and OWNER_ID not in ASSIGNEES:
+        return ASSIGNEES + [OWNER_ID]
+    return ASSIGNEES
+
+
 def create_task(g):
     lb = g["labels"]
     env = lb.get("environment") or lb.get("env") or "-"
@@ -191,7 +200,7 @@ def create_task(g):
     body = {
         "name": mask(title)[:200],
         "markdown_description": desc,
-        "assignees": ASSIGNEES,
+        "assignees": assignees_for(g["app"]),
         "priority": 2 if env.startswith("prod") else 3,
         "custom_item_id": 1004,  # workspace'teki "Bug" task tipi
     }
