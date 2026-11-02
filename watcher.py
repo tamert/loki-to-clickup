@@ -1,6 +1,6 @@
 """Loki'deki kritik/500 hataları ClickUp'a task olarak açar.
 
-Aynı hata (fingerprint) ikinci kez task açmaz, mevcut task'a yorum olarak sayı düşer.
+Aynı hata (fingerprint) ikinci kez task açmaz; task kapatılmışsa yeniden açılır.
 Sadece stdlib. DRY_RUN=1 ile ClickUp'a dokunmadan ne yapacağını yazar.
 """
 import hashlib
@@ -195,7 +195,7 @@ def create_task(g):
         "Örnek log:",
         f"```\n{mask(g['sample'])[:4000]}\n```",
         "",
-        "_Bu task loki-clickup watcher tarafından otomatik açıldı. Aynı hata tekrar düşerse yeni task açılmaz, buraya yorum eklenir._",
+        "_Bu task loki-clickup watcher tarafından otomatik açıldı. Aynı hata tekrar düşerse yeni task açılmaz; kapatılmışsa yeniden açılır._",
     ])
     body = {
         "name": mask(title)[:200],
@@ -208,18 +208,19 @@ def create_task(g):
 
 
 def flush_comment(st, now):
-    """Bekleyen sayıyı task'a yorum olarak yazar. Task silinmişse False."""
+    """Task kapatılmışsa yeniden açar ve yorum yazar. Task silinmişse False."""
     try:
         task = clickup("GET", f"/task/{st['task_id']}")
     except urllib.error.HTTPError as e:
         if e.code in (401, 404):  # silinmiş ya da erişim yok
             return False
         raise
-    text = f"{fmt(st['pending_from'])} - {fmt(st['pending_to'])} arası {st['pending']} yeni log düştü. Toplam: {st['total']}."
+    # Açık task'a yorum atılmaz: her yorum assignee'lere bildirim gidiyor. Sadece kapalıysa yeniden açılır.
     if task.get("status", {}).get("type") == "closed":
+        text = (f"Çözüldü olarak kapatılmıştı ama hata tekrar düştü, task yeniden açıldı.\n"
+                f"{fmt(st['pending_from'])} - {fmt(st['pending_to'])} arası {st['pending']} log. Toplam: {st['total']}.")
         clickup("PUT", f"/task/{st['task_id']}", {"status": "new report"})
-        text = "Çözüldü olarak kapatılmıştı ama hata tekrar düştü, task yeniden açıldı.\n" + text
-    clickup("POST", f"/task/{st['task_id']}/comment", {"comment_text": text, "notify_all": False})
+        clickup("POST", f"/task/{st['task_id']}/comment", {"comment_text": text, "notify_all": False})
     st.update(pending=0, last_comment=now)
     return True
 
