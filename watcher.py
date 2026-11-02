@@ -27,9 +27,13 @@ LOKI = os.environ.get("LOKI_URL", "http://localhost:3100").rstrip("/")
 TOKEN = os.environ.get("CLICKUP_TOKEN", "")
 LIST_ID = os.environ.get("CLICKUP_LIST_ID", "")
 ASSIGNEES = [int(x) for x in os.environ.get("CLICKUP_ASSIGNEES", "").split(",") if x.strip()]
-# OWNER_ID her task'a eklenir, OWNER_SKIP_APPS'teki app'ler hariç
-OWNER_ID = int(os.environ.get("OWNER_ID") or 0)
-OWNER_SKIP_APPS = {x.strip() for x in os.environ.get("OWNER_SKIP_APPS", "").split(",") if x.strip()}
+# APP_OWNERS: "userid=app1,app2;userid2=app3". Kişi sadece kendi app'lerinin task'larına eklenir.
+APP_OWNERS = {}
+for part in os.environ.get("APP_OWNERS", "").split(";"):
+    uid, _, apps = part.partition("=")
+    for a in apps.split(","):
+        if uid.strip() and a.strip():
+            APP_OWNERS.setdefault(a.strip(), []).append(int(uid))
 INTERVAL = int(os.environ.get("INTERVAL_SEC", "300"))
 COMMENT_EVERY = int(os.environ.get("COMMENT_EVERY_MIN", "60")) * 60
 FIRST_LOOKBACK = int(os.environ.get("FIRST_LOOKBACK_MIN", "15")) * 60
@@ -171,9 +175,7 @@ def fmt(ns):
 
 
 def assignees_for(app):
-    if OWNER_ID and app not in OWNER_SKIP_APPS and OWNER_ID not in ASSIGNEES:
-        return ASSIGNEES + [OWNER_ID]
-    return ASSIGNEES
+    return ASSIGNEES + [u for u in APP_OWNERS.get(app, []) if u not in ASSIGNEES]
 
 
 def create_task(g):

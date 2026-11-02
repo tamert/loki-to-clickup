@@ -29,8 +29,7 @@ assert w.FOURXX.match("ForbiddenError") and w.FOURXX.match("NotFoundException")
 print("ok")
 
 
-w.ASSIGNEES, w.OWNER_ID, w.OWNER_SKIP_APPS = [1, 2], 9, {"corpeo-v1"}
+w.ASSIGNEES, w.APP_OWNERS = [1, 2], {"tua-cms": [9], "orav": [2, 7]}
 assert w.assignees_for("tua-cms") == [1, 2, 9]
-assert w.assignees_for("corpeo-v1") == [1, 2]
-w.OWNER_ID = 0
-assert w.assignees_for("tua-cms") == [1, 2]
+assert w.assignees_for("orav") == [1, 2, 7]
+assert w.assignees_for("tipstory-dev-api-c1") == [1, 2]
