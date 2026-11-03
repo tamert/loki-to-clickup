@@ -286,8 +286,9 @@ def scan(state):
 
 
 def main():
-    if not DRY_RUN and (not TOKEN or not ASSIGNEES or not LIST_ID):
-        sys.exit("CLICKUP_TOKEN, CLICKUP_LIST_ID ve CLICKUP_ASSIGNEES gerekli")
+    # Atama ya herkese (CLICKUP_ASSIGNEES) ya app bazli (APP_OWNERS); ikisi birden bos olamaz
+    if not DRY_RUN and (not TOKEN or not LIST_ID or not (ASSIGNEES or APP_OWNERS)):
+        sys.exit("CLICKUP_TOKEN, CLICKUP_LIST_ID ve CLICKUP_ASSIGNEES ya da APP_OWNERS gerekli")
     once = "--once" in sys.argv
     while True:
         state = load_state()
